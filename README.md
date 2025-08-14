@@ -32,10 +32,10 @@ A Node.js application that lets users upload files via a Telegram bot, stores th
    npm install
    ```
 
-3. Create a `.env` file based on `.env.example`:
+3. Create a `.env` file based on `env.example`:
 
    ```bash
-   cp .env.example .env
+   cp env.example .env
    ```
 
 4. Update the `.env` file with your credentials:
@@ -64,6 +64,54 @@ A Node.js application that lets users upload files via a Telegram bot, stores th
    ```bash
    npm run dev
    ```
+
+## Production Deployment
+
+### Docker Deployment (Recommended)
+
+The easiest way to deploy in production is using Docker:
+
+```bash
+# Build and start containers
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# Stop containers
+docker-compose down
+```
+
+### Manual Deployment
+
+For manual deployment:
+
+1. Set NODE_ENV to production:
+
+```bash
+export NODE_ENV=production
+```
+
+2. Build and start the application:
+
+```bash
+npm run build
+npm run prod:start
+```
+
+### Production Features
+
+This application includes several production-ready features:
+
+- **Clustering**: Automatically utilizes all CPU cores in production
+- **Rate Limiting**: Prevents abuse of the API
+- **Security Headers**: Helmet middleware provides security headers
+- **Structured Logging**: Winston logger with different formats for dev/prod
+- **Performance Monitoring**: Tracks and logs slow responses
+- **Graceful Shutdown**: Properly closes connections on shutdown
+- **Health Checks**: Built-in health endpoint for monitoring
+- **Error Handling**: Comprehensive error handling and reporting
+- **Singleton Database Connection**: Efficient database connection management
 
 ## Usage
 

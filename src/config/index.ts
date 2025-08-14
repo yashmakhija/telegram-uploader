@@ -17,7 +17,7 @@ export const config = {
   },
 
   upload: {
-    maxFileSize: 100 * 1024 * 1024,
+    maxFileSize: 2 * 1024 * 1024 * 1024, // 2GB limit
   },
 
   database: {

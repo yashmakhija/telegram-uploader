@@ -2,10 +2,13 @@ import { Telegraf } from "telegraf";
 import { PrismaClient } from "@prisma/client";
 import { v4 as uuidv4 } from "uuid";
 import { BotContext, TelegramFileInfo } from "../types/index.js";
+import { PermissionService } from "./permission.service.js";
+import logger from "../utils/logger.js";
 
 export class TelegramService {
   private bot: Telegraf;
   private prisma: PrismaClient;
+  private permissionService: PermissionService;
   private telegramApiUrl: string = "https://api.telegram.org";
   private channelId: string;
   private publicUrl: string;
@@ -19,6 +22,7 @@ export class TelegramService {
   ) {
     this.bot = new Telegraf(botToken);
     this.prisma = prisma;
+    this.permissionService = new PermissionService(prisma);
     this.channelId = channelId;
     this.publicUrl = publicUrl || `http://localhost:${port}`;
 
@@ -35,16 +39,13 @@ export class TelegramService {
     this.bot.on("video", this.handleVideoUpload.bind(this));
     this.bot.on("audio", this.handleAudioUpload.bind(this));
 
+    // Admin commands
+    this.bot.command("grant", this.handleGrant.bind(this));
+    this.bot.command("revoke", this.handleRevoke.bind(this));
+    this.bot.command("list_users", this.handleListUsers.bind(this));
+
     // Help command
-    this.bot.command("help", (ctx) => {
-      ctx.reply(
-        "Welcome to File Uploader Bot!\n\n" +
-          "Commands:\n" +
-          "/start - Register and start using the bot\n" +
-          "/help - Show this help message\n\n" +
-          "Simply send me any file, photo, video, or audio to upload it."
-      );
-    });
+    this.bot.command("help", this.handleHelp.bind(this));
 
     // Unknown command handler
     this.bot.on("text", (ctx) => {
@@ -55,16 +56,16 @@ export class TelegramService {
   public async start(): Promise<void> {
     try {
       await this.bot.launch();
-      console.log("Telegram bot started successfully");
+      logger.info("Telegram bot started successfully");
     } catch (error) {
-      console.error("Failed to start Telegram bot:", error);
+      logger.error("Failed to start Telegram bot:", { error });
       throw error;
     }
   }
 
   public stop(reason?: string): void {
     this.bot.stop(reason);
-    console.log(`Telegram bot stopped: ${reason || "No reason provided"}`);
+    logger.info(`Telegram bot stopped: ${reason || "No reason provided"}`);
   }
 
   private async handleStart(ctx: any): Promise<void> {
@@ -74,6 +75,7 @@ export class TelegramService {
       const username = ctx.from.username;
       const isBot = ctx.from.is_bot;
 
+      // Create or update user
       await this.prisma.user.upsert({
         where: { telegramId },
         update: { name, username },
@@ -85,13 +87,176 @@ export class TelegramService {
         },
       });
 
-      ctx.reply(
-        `Welcome to File Uploader Bot, ${name}!\n\n` +
-          "Send me any file, photo, video, or audio to upload it.\n" +
-          "I will provide you with a download link that you can share."
-      );
+      // Check if user has upload permission
+      const canUpload = await this.permissionService.canUpload(telegramId);
+      const isAdmin = await this.permissionService.isAdmin(telegramId);
+
+      let message = `Welcome to File Uploader Bot, ${name}!\n\n`;
+
+      // Always show the user's ID for easy access sharing
+      message += `Your Telegram ID: <code>${telegramId}</code>\n\n`;
+
+      if (canUpload) {
+        message +=
+          "You are authorized to upload files. Send me any file, photo, video, or audio to upload it.\n" +
+          "I will provide you with a download link that you can share.\n\n" +
+          "Maximum file size: <b>2GB</b>";
+      } else {
+        message +=
+          "You currently don't have permission to upload files. Please contact @heloooasaxaxa to request access.\n" +
+          "Share your Telegram ID shown above when requesting access.";
+      }
+
+      if (isAdmin) {
+        message +=
+          "\n\nYou have ADMIN privileges. Type /help to see available admin commands.";
+      }
+
+      // Send with HTML parse mode to allow code formatting
+      ctx.reply(message, { parse_mode: "HTML" });
     } catch (error) {
-      console.error("Error in start command:", error);
+      logger.error("Error in start command:", { error });
+      ctx.reply("An error occurred. Please try again later.");
+    }
+  }
+
+  private async handleHelp(ctx: any): Promise<void> {
+    try {
+      const telegramId = ctx.from.id.toString();
+      const isAdmin = await this.permissionService.isAdmin(telegramId);
+      const canUpload = await this.permissionService.canUpload(telegramId);
+
+      let message =
+        "Welcome to File Uploader Bot!\n\n" +
+        "Basic Commands:\n" +
+        "/start - Register and start using the bot (also shows your Telegram ID)\n" +
+        "/help - Show this help message\n\n";
+
+      // Show user their ID in help message too for convenience
+      message += `Your Telegram ID: <code>${telegramId}</code>\n\n`;
+
+      if (canUpload) {
+        message +=
+          "You can send me any file, photo, video, or audio to upload it.\n" +
+          "Maximum file size: <b>2GB</b>\n\n";
+      } else {
+        message +=
+          "You currently don't have permission to upload files. Please contact @heloooasaxaxa to request access.\n" +
+          "Share your Telegram ID shown above when requesting access.\n\n";
+      }
+
+      if (isAdmin) {
+        message +=
+          "Admin Commands:\n" +
+          "/grant [user_id] - Grant upload permission to a user\n" +
+          "/revoke [user_id] - Revoke upload permission from a user\n" +
+          "/list_users - List all users with upload permission\n\n" +
+          "Note: To grant/revoke permissions, the user must have used /start with the bot first.\n" +
+          "For user_id, use their Telegram ID number shown when they use /start.";
+      }
+
+      ctx.reply(message, { parse_mode: "HTML" });
+    } catch (error) {
+      logger.error("Error in help command:", { error });
+      ctx.reply("An error occurred. Please try again later.");
+    }
+  }
+
+  private async handleGrant(ctx: any): Promise<void> {
+    try {
+      const adminTelegramId = ctx.from.id.toString();
+      const args = ctx.message.text.split(" ");
+
+      if (args.length !== 2) {
+        return ctx.reply(
+          "Usage: /grant [user_id]\n\nExample: /grant 123456789"
+        );
+      }
+
+      const targetTelegramId = args[1].trim();
+      const result = await this.permissionService.grantUploadPermission(
+        targetTelegramId,
+        adminTelegramId
+      );
+
+      if (result.success && result.user) {
+        const userName = result.user.name || "User";
+        ctx.reply(
+          `Success! ${userName} now has upload permission.\n\nThey can now upload files to the bot.`
+        );
+      } else {
+        ctx.reply(
+          ` ${result.message}\n\nMake sure the user has started the bot with /start first.`
+        );
+      }
+    } catch (error) {
+      logger.error("Error in grant command:", { error });
+      ctx.reply("An error occurred. Please try again later.");
+    }
+  }
+
+  private async handleRevoke(ctx: any): Promise<void> {
+    try {
+      const adminTelegramId = ctx.from.id.toString();
+      const args = ctx.message.text.split(" ");
+
+      if (args.length !== 2) {
+        return ctx.reply(
+          "Usage: /revoke [user_id]\n\nExample: /revoke 123456789"
+        );
+      }
+
+      const targetTelegramId = args[1].trim();
+      const result = await this.permissionService.revokeUploadPermission(
+        targetTelegramId,
+        adminTelegramId
+      );
+
+      if (result.success && result.user) {
+        const userName = result.user.name || "User";
+        ctx.reply(
+          `${userName}'s upload permission has been revoked.\n\nThey can no longer upload files to the bot.`
+        );
+      } else {
+        ctx.reply(`${result.message}`);
+      }
+    } catch (error) {
+      logger.error("Error in revoke command:", { error });
+      ctx.reply("An error occurred. Please try again later.");
+    }
+  }
+
+  private async handleListUsers(ctx: any): Promise<void> {
+    try {
+      const adminTelegramId = ctx.from.id.toString();
+      const result = await this.permissionService.listUsersWithUploadPermission(
+        adminTelegramId
+      );
+
+      if (!result.success) {
+        return ctx.reply(result.message);
+      }
+
+      const users = result.users || [];
+
+      if (users.length === 0) {
+        return ctx.reply("No users have upload permission yet.");
+      }
+
+      let message = "Users with upload permission:\n\n";
+
+      users.forEach((user, index) => {
+        message +=
+          `${index + 1}. ${user.name}${
+            user.username ? ` (@${user.username})` : ""
+          }\n` +
+          `   ID: <code>${user.telegramId}</code>\n` +
+          `   Role: ${user.isAdmin ? "Admin" : "User"}\n\n`;
+      });
+
+      ctx.reply(message, { parse_mode: "HTML" });
+    } catch (error) {
+      logger.error("Error in list_users command:", { error });
       ctx.reply("An error occurred. Please try again later.");
     }
   }
@@ -99,6 +264,16 @@ export class TelegramService {
   private async handleFileUpload(ctx: any): Promise<void> {
     try {
       const telegramId = ctx.from.id.toString();
+
+      // Check if user has permission to upload
+      const canUpload = await this.permissionService.canUpload(telegramId);
+
+      if (!canUpload) {
+        return ctx.reply(
+          "You don't have permission to upload files. Please contact an administrator for access."
+        );
+      }
+
       const user = await this.getUserByTelegramId(telegramId);
 
       if (!user) {
@@ -113,7 +288,7 @@ export class TelegramService {
         fileSize: file.file_size,
       });
     } catch (error) {
-      console.error("Error handling file upload:", error);
+      logger.error("Error handling file upload:", { error });
       ctx.reply(
         "An error occurred while uploading your file. Please try again later."
       );
@@ -123,6 +298,16 @@ export class TelegramService {
   private async handlePhotoUpload(ctx: any): Promise<void> {
     try {
       const telegramId = ctx.from.id.toString();
+
+      // Check if user has permission to upload
+      const canUpload = await this.permissionService.canUpload(telegramId);
+
+      if (!canUpload) {
+        return ctx.reply(
+          "You don't have permission to upload files. Please contact an administrator for access."
+        );
+      }
+
       const user = await this.getUserByTelegramId(telegramId);
 
       if (!user) {
@@ -139,7 +324,7 @@ export class TelegramService {
         fileSize: photo.file_size,
       });
     } catch (error) {
-      console.error("Error handling photo upload:", error);
+      logger.error("Error handling photo upload:", { error });
       ctx.reply(
         "An error occurred while uploading your photo. Please try again later."
       );
@@ -149,6 +334,16 @@ export class TelegramService {
   private async handleVideoUpload(ctx: any): Promise<void> {
     try {
       const telegramId = ctx.from.id.toString();
+
+      // Check if user has permission to upload
+      const canUpload = await this.permissionService.canUpload(telegramId);
+
+      if (!canUpload) {
+        return ctx.reply(
+          "You don't have permission to upload files. Please contact an administrator for access."
+        );
+      }
+
       const user = await this.getUserByTelegramId(telegramId);
 
       if (!user) {
@@ -164,7 +359,7 @@ export class TelegramService {
         fileSize: video.file_size,
       });
     } catch (error) {
-      console.error("Error handling video upload:", error);
+      logger.error("Error handling video upload:", { error });
       ctx.reply(
         "An error occurred while uploading your video. Please try again later."
       );
@@ -174,6 +369,16 @@ export class TelegramService {
   private async handleAudioUpload(ctx: any): Promise<void> {
     try {
       const telegramId = ctx.from.id.toString();
+
+      // Check if user has permission to upload
+      const canUpload = await this.permissionService.canUpload(telegramId);
+
+      if (!canUpload) {
+        return ctx.reply(
+          "You don't have permission to upload files. Please contact an administrator for access."
+        );
+      }
+
       const user = await this.getUserByTelegramId(telegramId);
 
       if (!user) {
@@ -189,7 +394,7 @@ export class TelegramService {
         fileSize: audio.file_size,
       });
     } catch (error) {
-      console.error("Error handling audio upload:", error);
+      logger.error("Error handling audio upload:", { error });
       ctx.reply(
         "An error occurred while uploading your audio. Please try again later."
       );
@@ -249,7 +454,7 @@ export class TelegramService {
           `Download link: ${publicUrl}`
       );
     } catch (error) {
-      console.error("Error processing file:", error);
+      logger.error("Error processing file:", { error });
       throw error;
     }
   }

@@ -22,6 +22,7 @@ model User {
   username   String?
   isBot      Boolean  @default(false)
   isAdmin    Boolean  @default(false)
+  canUpload  Boolean  @default(false)  // Permission to upload files
   files      UploadFile[]
   downloads  Download[]
 }
