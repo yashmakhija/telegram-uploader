@@ -1,0 +1,1 @@
+{"root":["./src/index.ts","./src/config/index.ts","./src/middleware/error.middleware.ts","./src/routes/admin.route.ts","./src/routes/download.route.ts","./src/services/telegram.service.ts","./src/types/index.ts"],"version":"5.9.2"}

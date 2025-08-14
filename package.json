@@ -1,0 +1,46 @@
+{
+  "name": "telegram-file-uploader",
+  "version": "1.0.0",
+  "description": "Telegram bot for uploading files and providing proxy download URLs",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "tsc --b && node dist/index.js",
+    "build": "tsc",
+    "dev": "ts-node-dev --respawn src/index.ts",
+    "postinstall": "npx prisma generate",
+    "migrate": "prisma migrate dev",
+    "studio": "prisma studio"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "file",
+    "upload",
+    "proxy"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@prisma/client": "^6.14.0",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
+    "@types/express-fileupload": "^1.5.1",
+    "@types/morgan": "^1.9.10",
+    "@types/uuid": "^9.0.8",
+    "axios": "^1.11.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.1",
+    "express": "^5.1.0",
+    "express-fileupload": "^1.5.2",
+    "morgan": "^1.10.1",
+    "telegraf": "^4.16.3",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.2.1",
+    "prisma": "^6.14.0",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.4.2"
+  }
+}
